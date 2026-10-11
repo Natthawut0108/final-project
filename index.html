@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>คำนวณค่ารถเมล์</title>
+<meta name="description" content="ประมาณค่ารถเมล์กรุงเทพฯ จากต้นทางไปปลายทาง">
+<style>
+:root{--bg:#f5f7fb;--card:#fff;--text:#1b2133;--muted:#667090;--line:#e2e6f0;--accent:#e8453c;--ok:#1f9d68}
+@media (prefers-color-scheme:dark){:root{--bg:#12141c;--card:#1b1e29;--text:#eef0f7;--muted:#9aa2bd;--line:#2b3042}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'Noto Sans Thai','Sarabun',system-ui,sans-serif;line-height:1.55}
+.wrap{max-width:720px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:1.6rem;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+.card h2{font-size:1rem;margin:0 0 10px}
+.row{display:flex;gap:8px}
+.row input{flex:1;min-width:0}
+input,button{font:inherit;color:inherit;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px 12px}
+button{cursor:pointer;font-weight:600}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;width:100%}
+button:disabled{opacity:.55;cursor:not-allowed}
+.opts{list-style:none;margin:8px 0 0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.opts button{width:100%;text-align:left;border:0;border-radius:0;font-weight:400;font-size:.9rem;border-bottom:1px solid var(--line)}
+.opts li:last-child button{border-bottom:0}
+.picked{color:var(--ok);font-size:.85rem;margin-top:6px}
+.err{color:#d33;margin:8px 0}
+.note{color:var(--muted);font-size:.85rem}
+.fare{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.fare:last-child{border-bottom:0}
+.fare b{font-size:1.5rem;color:var(--accent)}
+.fare small{display:block;color:var(--muted)}
+.swap{display:block;margin:-4px auto 12px}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <h1>🚌 คำนวณค่ารถเมล์</h1>
+  <p class="sub">ประมาณค่าโดยสารรถเมล์กรุงเทพฯ จากที่หนึ่งไปอีกที่หนึ่ง</p>
+
+  <div class="card" id="from">
+    <h2>ต้นทาง</h2>
+    <form class="row"><input placeholder="เช่น อนุสาวรีย์ชัยสมรภูมิ"><button>ค้นหา</button></form>
+    <div class="err"></div><ul class="opts" hidden></ul><div class="picked"></div>
+  </div>
+  <button class="swap" id="swap" type="button" title="สลับต้นทาง/ปลายทาง">⇅ สลับ</button>
+  <div class="card" id="to">
+    <h2>ปลายทาง</h2>
+    <form class="row"><input placeholder="เช่น สยามพารากอน"><button>ค้นหา</button></form>
+    <div class="err"></div><ul class="opts" hidden></ul><div class="picked"></div>
+  </div>
+
+  <button class="primary" id="calc" disabled>คำนวณค่ารถเมล์</button>
+  <div class="err" id="calcErr"></div>
+
+  <section class="card" id="result" style="margin-top:16px" hidden></section>
+</main>
+
+<script>
+// ===== อัตราค่าโดยสาร (ประมาณการ) — แก้ตัวเลขตรงนี้ได้ =====
+// อ้างอิงข่าวปี 2568-2569: รถร้อน ขสมก. 8 บาทตลอดสาย, รถแอร์ 13-25 บาท, รถ EV 15-25 บาท
+// ไม่มีตารางตามระยะทางอย่างเป็นทางการ จึงไล่ราคาตามกิโลเมตรแบบประมาณ
+const BUS_TYPES = [
+  { label: 'รถร้อน (ครีม-แดง)', min: 8,  max: 8,  note: '8 บาทตลอดสาย (กำลังทยอยเปลี่ยนเป็น EV)' },
+  { label: 'รถแอร์ ขสมก.',      min: 13, max: 25, note: 'ประมาณ 13-25 บาทตามระยะทาง' },
+  { label: 'รถ EV',             min: 15, max: 25, note: 'ประมาณ 15-25 บาทตามระยะทาง' },
+];
+const NEAR_KM = 4, FAR_KM = 24;
+function estimateFare(t, km) {
+  if (t.min === t.max) return t.min;
+  const x = Math.min(Math.max((km - NEAR_KM) / (FAR_KM - NEAR_KM), 0), 1);
+  return Math.round(t.min + x * (t.max - t.min));
+}
+
+// ===== ค้นหาสถานที่ (OpenStreetMap Nominatim) =====
+const picked = { from: null, to: null };
+function setupField(id) {
+  const root = document.getElementById(id);
+  const input = root.querySelector('input'), err = root.querySelector('.err');
+  const list = root.querySelector('.opts'), mark = root.querySelector('.picked');
+  root.querySelector('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    err.textContent = ''; list.hidden = true; list.innerHTML = '';
+    const q = input.value.trim();
+    if (q.length < 2) return;
+    try {
+      const r = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=th&accept-language=th&q=' + encodeURIComponent(q));
+      if (!r.ok) throw new Error();
+      const data = await r.json();
+      if (!data.length) { err.textContent = 'ไม่พบสถานที่ ลองพิมพ์ชื่อให้เฉพาะเจาะจงขึ้น'; return; }
+      data.forEach((d) => {
+        const li = document.createElement('li'), b = document.createElement('button');
+        b.type = 'button'; b.textContent = d.display_name;
+        b.onclick = () => { setPick(id, { name: d.display_name, lat: +d.lat, lon: +d.lon }); list.hidden = true; };
+        li.appendChild(b); list.appendChild(li);
+      });
+      list.hidden = false;
+    } catch { err.textContent = 'ค้นหาสถานที่ไม่สำเร็จ ลองใหม่อีกครั้ง'; }
+  });
+  root._mark = mark; root._input = input;
+}
+function setPick(id, p) {
+  picked[id] = p;
+  const root = document.getElementById(id);
+  root._mark.textContent = p ? 'เลือกแล้ว: ' + p.name : '';
+  document.getElementById('calc').disabled = !(picked.from && picked.to);
+}
+setupField('from'); setupField('to');
+document.getElementById('swap').onclick = () => {
+  const a = picked.from, b = picked.to;
+  const ia = document.querySelector('#from input'), ib = document.querySelector('#to input');
+  [ia.value, ib.value] = [ib.value, ia.value];
+  setPick('from', b); setPick('to', a);
+};
+
+// ===== หาระยะทาง (OSRM) / สำรองด้วยเส้นตรง x 1.3 =====
+function haversine(a, b) {
+  const R = 6371, rad = (x) => x * Math.PI / 180;
+  const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
+  const h = Math.sin(dLat/2)**2 + Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+document.getElementById('calc').onclick = async () => {
+  const btn = document.getElementById('calc'), errBox = document.getElementById('calcErr'), out = document.getElementById('result');
+  errBox.textContent = ''; out.hidden = true; btn.disabled = true; btn.textContent = 'กำลังคำนวณ…';
+  const a = picked.from, b = picked.to;
+  let km, minutes, estimated = false;
+  try {
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=false`);
+    const d = await r.json();
+    const route = d.routes && d.routes[0];
+    if (!route) throw new Error();
+    km = route.distance / 1000; minutes = route.duration / 60;
+  } catch {
+    km = haversine(a, b) * 1.3; minutes = km / 15 * 60; estimated = true;
+  }
+  out.innerHTML = `<h2>ระยะทางประมาณ ${km.toFixed(1)} กม. · ใช้เวลาประมาณ ${Math.round(minutes)} นาที (ถนน)</h2>` +
+    BUS_TYPES.map((t) => `<div class="fare"><div>${t.label}<small>${t.note}</small></div><b>${estimateFare(t, km)} ฿</b></div>`).join('') +
+    `<p class="note">ราคาเป็นค่าประมาณจากระยะทางถนน ไม่ใช่ราคาตามสายรถเมล์จริง เพราะเส้นทางและอัตราค่าโดยสารจริงอาจต่างกัน${estimated ? ' (หาเส้นทางไม่ได้ จึงประมาณระยะจากเส้นตรง)' : ''}</p>`;
+  out.hidden = false; btn.disabled = false; btn.textContent = 'คำนวณค่ารถเมล์';
+};
+</script>
+</body>
+</html>
