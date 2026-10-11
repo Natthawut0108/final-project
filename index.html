@@ -37,7 +37,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
 <body>
 <main class="wrap">
   <h1>🚌 คำนวณค่ารถเมล์</h1>
-  <p class="sub">ประมาณค่าโดยสารรถเมล์กรุงเทพฯ จากที่หนึ่งไปอีกที่หนึ่ง</p>
+  <p class="sub">บอกสายรถเมล์ที่ต้องขึ้นและค่าโดยสารประมาณ จากที่หนึ่งไปอีกที่หนึ่ง (กรุงเทพฯ)</p>
 
   <div class="card" id="from">
     <h2>ต้นทาง</h2>
@@ -114,12 +114,91 @@ document.getElementById('swap').onclick = () => {
   setPick('from', b); setPick('to', a);
 };
 
-// ===== หาระยะทาง (OSRM) / สำรองด้วยเส้นตรง x 1.3 =====
-function haversine(a, b) {
-  const R = 6371, rad = (x) => x * Math.PI / 180;
-  const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
-  const h = Math.sin(dLat/2)**2 + Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dLon/2)**2;
+// ===== ข้อมูลสายรถเมล์ ขสมก. (bus-data.json) =====
+let BUS = null;
+const busReady = fetch('bus-data.json').then((r) => r.json()).then((d) => { BUS = d; }).catch(() => {});
+
+const WALK_MAX = 800;      // เดินไปป้ายได้ไม่เกิน (เมตร)
+const TRANSFER_MAX = 300;  // ป้ายต่อรถห่างกันไม่เกิน (เมตร)
+function hav(a, b) { // เมตร
+  const R = 6371000, rad = (x) => x * Math.PI / 180;
+  const dLat = rad(b[0] - a[0]), dLon = rad(b[1] - a[1]);
+  const h = Math.sin(dLat/2)**2 + Math.cos(rad(a[0]))*Math.cos(rad(b[0]))*Math.sin(dLon/2)**2;
   return 2 * R * Math.asin(Math.sqrt(h));
+}
+const pos = (id) => BUS.stops[id];
+function rideM(stops, i, j) { let m = 0; for (let k = i; k < j; k++) m += hav(pos(stops[k]), pos(stops[k + 1])); return m; }
+
+// หาป้ายที่ใกล้จุดที่สุดในแต่ละสาย (ภายในระยะเดิน)
+function nearestOnRoutes(pt) {
+  const out = [];
+  BUS.routes.forEach((r, ri) => {
+    let best = -1, bd = WALK_MAX + 1;
+    r.s.forEach((id, k) => { const d = hav(pt, pos(id)); if (d < bd) { bd = d; best = k; } });
+    if (best >= 0) out.push({ ri, k: best, walk: bd });
+  });
+  return out;
+}
+
+function findRoutes(from, to) {
+  const A = nearestOnRoutes([from.lat, from.lon]);
+  const B = nearestOnRoutes([to.lat, to.lon]);
+  const bMap = new Map(B.map((x) => [x.ri, x]));
+  const options = [];
+  // เส้นทางตรง
+  A.forEach((a) => {
+    const b = bMap.get(a.ri);
+    if (!b || b.k <= a.k) return;
+    const r = BUS.routes[a.ri];
+    const m = rideM(r.s, a.k, b.k);
+    options.push({ legs: [{ r, from: a.k, to: b.k, m }], walk: a.walk + b.walk, cost: (a.walk + b.walk) / 80 + (b.k - a.k) * 1.8 });
+  });
+  const direct = dedupe(options).sort((x, y) => x.cost - y.cost).slice(0, 4);
+  if (direct.length) return { type: 'direct', options: direct };
+
+  // ต่อรถ 1 ครั้ง
+  const topA = A.sort((x, y) => x.walk - y.walk).slice(0, 25);
+  const topB = B.sort((x, y) => x.walk - y.walk).slice(0, 25);
+  const tr = [];
+  topA.forEach((a) => {
+    const ra = BUS.routes[a.ri];
+    topB.forEach((b) => {
+      const rb = BUS.routes[b.ri];
+      if (ra.n === rb.n) return;
+      let best = null;
+      for (let x = a.k + 1; x < ra.s.length; x++) {
+        const px = pos(ra.s[x]);
+        for (let y = 0; y < b.k; y++) {
+          const d = hav(px, pos(rb.s[y]));
+          if (d > TRANSFER_MAX) continue;
+          const cost = (x - a.k) * 1.8 + (b.k - y) * 1.8 + d / 80;
+          if (!best || cost < best.cost) best = { x, y, d, cost };
+        }
+      }
+      if (best) tr.push({
+        legs: [
+          { r: ra, from: a.k, to: best.x, m: rideM(ra.s, a.k, best.x) },
+          { r: rb, from: best.y, to: b.k, m: rideM(rb.s, best.y, b.k) },
+        ],
+        walk: a.walk + b.walk + best.d,
+        cost: (a.walk + b.walk) / 80 + best.cost + 15,
+      });
+    });
+  });
+  const opts = dedupe(tr).sort((x, y) => x.cost - y.cost).slice(0, 3);
+  return { type: opts.length ? 'transfer' : 'none', options: opts };
+}
+function dedupe(list) {
+  const seen = new Set();
+  return list.filter((o) => { const k = o.legs.map((l) => l.r.n).join('>'); if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
+// ===== หาระยะทาง (OSRM) / สำรองด้วยเส้นตรง x 1.3 =====
+const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+function legHtml(l, label) {
+  const stopsN = l.to - l.from;
+  return `<div>${label}ขึ้น <b>สาย ${esc(l.r.n)}</b> (ไปทาง ${esc(l.r.h)})<br>
+    <small>ขึ้นที่ ${esc(pos(l.r.s[l.from])[2])} → ลงที่ ${esc(pos(l.r.s[l.to])[2])} · ${stopsN} ป้าย · ${(l.m / 1000).toFixed(1)} กม.</small></div>`;
 }
 document.getElementById('calc').onclick = async () => {
   const btn = document.getElementById('calc'), errBox = document.getElementById('calcErr'), out = document.getElementById('result');
@@ -133,11 +212,31 @@ document.getElementById('calc').onclick = async () => {
     if (!route) throw new Error();
     km = route.distance / 1000; minutes = route.duration / 60;
   } catch {
-    km = haversine(a, b) * 1.3; minutes = km / 15 * 60; estimated = true;
+    km = hav([a.lat, a.lon], [b.lat, b.lon]) / 1000 * 1.3; minutes = km / 15 * 60; estimated = true;
   }
-  out.innerHTML = `<h2>ระยะทางประมาณ ${km.toFixed(1)} กม. · ใช้เวลาประมาณ ${Math.round(minutes)} นาที (ถนน)</h2>` +
-    BUS_TYPES.map((t) => `<div class="fare"><div>${t.label}<small>${t.note}</small></div><b>${estimateFare(t, km)} ฿</b></div>`).join('') +
-    `<p class="note">ราคาเป็นค่าประมาณจากระยะทางถนน ไม่ใช่ราคาตามสายรถเมล์จริง เพราะเส้นทางและอัตราค่าโดยสารจริงอาจต่างกัน${estimated ? ' (หาเส้นทางไม่ได้ จึงประมาณระยะจากเส้นตรง)' : ''}</p>`;
+  await busReady;
+  let html = '';
+  let legsForFare = null;
+  if (BUS) {
+    const res = findRoutes(a, b);
+    if (res.type === 'none') {
+      html += `<h2>สายรถเมล์ที่ควรขึ้น</h2><p class="note">ไม่พบสายตรงหรือต่อรถ 1 ครั้งที่ป้ายอยู่ห่างจากต้นทาง/ปลายทางไม่เกิน ${WALK_MAX} เมตร ลองเลือกสถานที่ที่อยู่ใกล้ถนนสายหลักมากขึ้น</p>`;
+    } else {
+      legsForFare = res.options[0].legs;
+      html += `<h2>สายรถเมล์ที่ควรขึ้น${res.type === 'transfer' ? ' (ต้องต่อรถ 1 ครั้ง)' : ''}</h2>`;
+      html += res.options.map((o, idx) => {
+        const legs = o.legs.map((l, i) => legHtml(l, o.legs.length > 1 ? (i === 0 ? 'ต่อที่ 1: ' : 'ต่อที่ 2: ') : '')).join('');
+        return `<div class="fare" style="align-items:flex-start"><div>${idx === 0 ? '⭐ แนะนำ<br>' : ''}${legs}<small>เดินรวมประมาณ ${Math.round(o.walk)} เมตร (ไปป้ายต้นทาง/จากป้ายปลายทาง${o.legs.length > 1 ? '/ระหว่างต่อรถ' : ''})</small></div></div>`;
+      }).join('');
+    }
+  } else {
+    html += `<p class="note">โหลดข้อมูลสายรถเมล์ไม่สำเร็จ (bus-data.json) จึงแสดงเฉพาะค่าโดยสารประมาณ</p>`;
+  }
+  const fareOf = (t) => legsForFare ? legsForFare.reduce((s, l) => s + estimateFare(t, l.m / 1000), 0) : estimateFare(t, km);
+  html += `<h2 style="margin-top:16px">ค่าโดยสารประมาณ${legsForFare ? ' (ตามสายที่แนะนำ)' : ''} · ถนนระยะ ${km.toFixed(1)} กม. ~${Math.round(minutes)} นาทีโดยรถยนต์</h2>` +
+    BUS_TYPES.map((t) => `<div class="fare"><div>${t.label}<small>${t.note}</small></div><b>${fareOf(t)} ฿</b></div>`).join('') +
+    `<p class="note">${BUS ? esc(BUS.asof) + ' อาจไม่ตรงกับสาย/ป้ายปัจจุบัน ' : ''}ราคาเป็นค่าประมาณตามระยะทาง ไม่ใช่ราคาจริงของแต่ละสาย และรถแต่ละสายอาจเป็นรถร้อนหรือรถแอร์ต่างกัน${estimated ? ' (หาเส้นทางถนนไม่ได้ จึงประมาณระยะจากเส้นตรง)' : ''}</p>`;
+  out.innerHTML = html;
   out.hidden = false; btn.disabled = false; btn.textContent = 'คำนวณค่ารถเมล์';
 };
 </script>
