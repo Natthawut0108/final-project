@@ -6,44 +6,61 @@
 <title>คำนวณค่ารถเมล์</title>
 <meta name="description" content="ประมาณค่ารถเมล์กรุงเทพฯ จากต้นทางไปปลายทาง">
 <style>
-:root{--bg:#f5f7fb;--card:#fff;--text:#1b2133;--muted:#667090;--line:#e2e6f0;--accent:#e8453c;--ok:#1f9d68}
-@media (prefers-color-scheme:dark){:root{--bg:#12141c;--card:#1b1e29;--text:#eef0f7;--muted:#9aa2bd;--line:#2b3042}}
+@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;600;700&display=swap');
+:root{--bg:#fff7e0;--card:#fff;--text:#1d2a4d;--muted:#6a7189;--line:#eadfbe;--accent:#e8453c;--accent2:#c42f27;--ok:#1f9d68;--yellow:#ffc933;--navy:#1d2a4d;--tint:#fff4cf}
+@media (prefers-color-scheme:dark){:root{--bg:#141a2e;--card:#1e2640;--text:#f3f1e8;--muted:#a4abc4;--line:#2e3858;--tint:#2a3150}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:'Noto Sans Thai','Sarabun',system-ui,sans-serif;line-height:1.55}
-.wrap{max-width:720px;margin:0 auto;padding:24px 16px 64px}
-h1{font-size:1.6rem;margin:0 0 4px}
-.sub{color:var(--muted);margin:0 0 20px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
-.card h2{font-size:1rem;margin:0 0 10px}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'Prompt','Noto Sans Thai','Sarabun',system-ui,sans-serif;line-height:1.6}
+.wrap{max-width:720px;margin:0 auto;padding:0 16px 64px}
+.hero{margin:0 0 20px;padding:28px 16px 0;background:linear-gradient(180deg,var(--accent) 0,var(--accent2) 100%);color:#fff;position:relative;overflow:hidden;border-radius:0 0 28px 28px}
+.hero-in{max-width:720px;margin:0 auto}
+h1{font-size:1.7rem;margin:0 0 4px;font-weight:700;letter-spacing:.2px}
+.sub{margin:0 0 14px;opacity:.92;font-size:.95rem;max-width:30em}
+.road{isolation:isolate;position:relative;height:64px;margin:0 -16px;border-top:6px solid var(--yellow)}
+.road::after{content:"";position:absolute;left:0;right:0;bottom:14px;border-top:3px dashed rgba(255,255,255,.7)}
+.road svg{position:absolute;left:0;bottom:12px;width:104px;animation:drive 14s linear infinite}
+.road::before{content:"";position:absolute;inset:0;background:#2a2f45;z-index:-1}
+@keyframes drive{from{left:-120px}to{left:100%}}
+@media (prefers-reduced-motion:reduce){.road svg{animation:none;left:calc(50% - 52px)}}
+.card{background:var(--card);border:1px solid var(--line);border-left:6px solid var(--yellow);border-radius:16px;padding:16px;margin-bottom:16px;box-shadow:0 2px 0 var(--line),0 8px 20px -12px rgba(29,42,77,.25)}
+.card h2{font-size:1rem;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+#from h2::before,#to h2::before{content:"A";width:24px;height:24px;border-radius:50%;background:var(--navy);color:#fff;font-size:.75rem;display:inline-flex;align-items:center;justify-content:center}
+#to h2::before{content:"B";background:var(--accent)}
+#coverage{border-left-color:var(--navy);background:var(--tint)}
+#result{border-left-color:var(--accent)}
 .row{display:flex;gap:8px}
 .row input{flex:1;min-width:0}
-input,button{font:inherit;color:inherit;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px 12px}
-button{cursor:pointer;font-weight:600}
-button.primary{background:var(--accent);border-color:var(--accent);color:#fff;width:100%}
+input,button{font:inherit;color:inherit;border:2px solid var(--line);background:var(--card);border-radius:12px;padding:10px 12px}
+input:focus{outline:none;border-color:var(--accent)}
+button{cursor:pointer;font-weight:600;transition:transform .1s}
+button:active{transform:translateY(1px)}
+#locBtn{background:var(--tint);border-color:var(--yellow)}
+button.primary{background:var(--yellow);border-color:#e0a900;color:#3a2a00;width:100%;font-size:1.1rem;font-weight:700;padding:14px;box-shadow:0 4px 0 #e0a900}
+button.primary:active{box-shadow:0 1px 0 #e0a900;transform:translateY(3px)}
 button:disabled{opacity:.55;cursor:not-allowed}
-.opts{list-style:none;margin:8px 0 0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.opts{list-style:none;margin:8px 0 0;padding:0;border:2px solid var(--line);border-radius:12px;overflow:hidden}
 .opts button{width:100%;text-align:left;border:0;border-radius:0;font-weight:400;font-size:.9rem;border-bottom:1px solid var(--line)}
 .opts li:last-child button{border-bottom:0}
 .picked{color:var(--ok);font-size:.85rem;margin-top:6px}
 .err{color:#d33;margin:8px 0}
 .note{color:var(--muted);font-size:.85rem}
-.fare{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.fare{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:2px dashed var(--line)}
 .fare:last-child{border-bottom:0}
 .fare b{font-size:1.5rem;color:var(--accent)}
 .fare small{display:block;color:var(--muted)}
-.swap{display:block;margin:-4px auto 12px}
-#map{height:340px;border-radius:12px;margin-top:12px;border:1px solid var(--line);z-index:0}
-.opt{cursor:pointer;border-radius:10px;padding-left:8px;padding-right:8px}
-.opt.on{background:rgba(232,69,60,.1)}
+.swap{display:block;margin:-4px auto 12px;border-radius:999px;background:var(--navy);color:#fff;border-color:var(--navy);padding:6px 18px}
+.rt{display:inline-block;min-width:2.6em;text-align:center;background:var(--navy);color:var(--yellow);font-weight:700;border-radius:8px;padding:0 8px;border:2px solid var(--yellow);margin:0 2px}
+#map{height:340px;border-radius:14px;margin-top:12px;border:3px solid var(--yellow);z-index:0}
+.opt{cursor:pointer;border-radius:12px;padding-left:8px;padding-right:8px}
+.opt.on{background:var(--tint)}
 .pin{width:22px;height:22px;border-radius:50%;border:3px solid #fff;box-shadow:0 1px 4px #0006;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 </head>
 <body>
+<header class="hero"><div class="hero-in"><h1>🚌 คำนวณค่ารถเมล์</h1><p class="sub">บอกสายรถเมล์ที่ต้องขึ้นและค่าโดยสารประมาณ จากที่หนึ่งไปอีกที่หนึ่ง (กรุงเทพฯ)</p></div><div class="road"><svg viewBox="0 0 104 52" aria-hidden="true"><rect x="2" y="6" width="96" height="36" rx="9" fill="#fff4cf"/><rect x="2" y="26" width="96" height="9" fill="#e8453c"/><rect x="2" y="35" width="96" height="7" rx="3" fill="#fff4cf"/><g fill="#7fc4ee" stroke="#1d2a4d" stroke-width="2"><rect x="9" y="12" width="14" height="12" rx="2"/><rect x="27" y="12" width="14" height="12" rx="2"/><rect x="45" y="12" width="14" height="12" rx="2"/><rect x="63" y="12" width="14" height="12" rx="2"/><rect x="81" y="12" width="13" height="18" rx="2"/></g><g fill="#1d2a4d"><circle cx="26" cy="43" r="7"/><circle cx="76" cy="43" r="7"/></g><g fill="#ccc"><circle cx="26" cy="43" r="3"/><circle cx="76" cy="43" r="3"/></g></svg></div></header>
 <main class="wrap">
-  <h1>🚌 คำนวณค่ารถเมล์</h1>
-  <p class="sub">บอกสายรถเมล์ที่ต้องขึ้นและค่าโดยสารประมาณ จากที่หนึ่งไปอีกที่หนึ่ง (กรุงเทพฯ)</p>
 
   <section class="card" id="coverage">
     <h2>รองรับพื้นที่ไหนบ้าง</h2>
@@ -284,7 +301,7 @@ function dedupe(list) {
 const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 function legHtml(l, label) {
   const stopsN = l.to - l.from;
-  return `<div>${label}ขึ้น <b>สาย ${esc(l.r.n)}</b> <small style="display:inline">[${esc(l.r.a || 'ขสมก.')}]</small> (ไปทาง ${esc(l.r.h)})<br>
+  return `<div>${label}ขึ้นสาย <span class="rt">${esc(l.r.n)}</span> <small style="display:inline">[${esc(l.r.a || 'ขสมก.')}]</small> (ไปทาง ${esc(l.r.h)})<br>
     <small>ขึ้นที่ ${esc(pos(l.r.s[l.from])[2])} → ลงที่ ${esc(pos(l.r.s[l.to])[2])} · ${stopsN} ป้าย · ${(l.m / 1000).toFixed(1)} กม.</small></div>`;
 }
 document.getElementById('calc').onclick = async () => {
