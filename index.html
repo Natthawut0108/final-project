@@ -32,7 +32,13 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .fare b{font-size:1.5rem;color:var(--accent)}
 .fare small{display:block;color:var(--muted)}
 .swap{display:block;margin:-4px auto 12px}
+#map{height:340px;border-radius:12px;margin-top:12px;border:1px solid var(--line);z-index:0}
+.opt{cursor:pointer;border-radius:10px;padding-left:8px;padding-right:8px}
+.opt.on{background:rgba(232,69,60,.1)}
+.pin{width:22px;height:22px;border-radius:50%;border:3px solid #fff;box-shadow:0 1px 4px #0006;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
 </style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 </head>
 <body>
 <main class="wrap">
@@ -52,6 +58,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
   <div class="card" id="from">
     <h2>ต้นทาง</h2>
     <form class="row"><input placeholder="พิมพ์ชื่อสถานที่ เช่น อนุสาวรีย์ชัยสมรภูมิ" autocomplete="off"></form>
+    <button type="button" id="locBtn" style="margin-top:8px">📍 ใช้ตำแหน่งปัจจุบันเป็นต้นทาง</button>
     <div class="err"></div><ul class="opts" hidden></ul><div class="picked"></div>
   </div>
   <button class="swap" id="swap" type="button" title="สลับต้นทาง/ปลายทาง">⇅ สลับ</button>
@@ -161,6 +168,37 @@ document.getElementById('swap').onclick = () => {
   setPick('from', b); setPick('to', a);
 };
 
+
+// ===== ใช้ตำแหน่งปัจจุบันเป็นต้นทาง =====
+document.getElementById('locBtn').onclick = () => {
+  const btn = document.getElementById('locBtn');
+  const err = document.querySelector('#from .err'), input = document.querySelector('#from input');
+  err.textContent = '';
+  if (!navigator.geolocation) { err.textContent = 'เบราว์เซอร์นี้ไม่รองรับการหาตำแหน่ง ให้พิมพ์ต้นทางเองแทน'; return; }
+  btn.disabled = true; btn.textContent = 'กำลังหาตำแหน่ง…';
+  navigator.geolocation.getCurrentPosition((p) => {
+    btn.disabled = false; btn.textContent = '📍 ใช้ตำแหน่งปัจจุบันเป็นต้นทาง';
+    const here = { lat: p.coords.latitude, lon: p.coords.longitude };
+    let label = 'ตำแหน่งปัจจุบัน';
+    if (BUS && inCover(here)) {
+      let best = null, bd = Infinity;
+      for (const v of Object.values(BUS.stops)) { const d = hav([here.lat, here.lon], [v[0], v[1]]); if (d < bd) { bd = d; best = v; } }
+      if (best) label += ` (ใกล้ป้าย ${best[2]} ${Math.round(bd)} ม.)`;
+    } else if (BUS) {
+      err.textContent = 'ตำแหน่งของคุณอยู่นอกพื้นที่ที่มีข้อมูลสายรถเมล์ (กรุงเทพฯ และปริมณฑล) จะได้เฉพาะค่าโดยสารประมาณ';
+    }
+    if (p.coords.accuracy > 500) err.textContent = `ตำแหน่งคลาดเคลื่อนประมาณ ${Math.round(p.coords.accuracy)} ม. (ปกติเกิดบนคอมพิวเตอร์) ถ้าไม่ตรงให้พิมพ์ต้นทางเอง`;
+    input.value = 'ตำแหน่งปัจจุบัน';
+    document.querySelector('#from .opts').hidden = true;
+    setPick('from', { name: label, lat: here.lat, lon: here.lon });
+  }, (e) => {
+    btn.disabled = false; btn.textContent = '📍 ใช้ตำแหน่งปัจจุบันเป็นต้นทาง';
+    err.textContent = e.code === 1 ? 'ไม่ได้รับอนุญาตให้ใช้ตำแหน่ง ให้กดอนุญาตในเบราว์เซอร์ หรือพิมพ์ต้นทางเอง'
+      : e.code === 3 ? 'หาตำแหน่งนานเกินไป ลองอีกครั้ง หรือพิมพ์ต้นทางเอง'
+      : 'หาตำแหน่งไม่ได้ ให้พิมพ์ต้นทางเอง';
+  }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+};
+
 // ===== ข้อมูลสายรถเมล์ ขสมก. (bus-data.json) =====
 let BUS = null;
 const busReady = fetch('bus-data.json').then((r) => r.json()).then((d) => { BUS = d; }).catch(() => {});
@@ -265,7 +303,7 @@ document.getElementById('calc').onclick = async () => {
   }
   await busReady;
   let html = '';
-  let legsForFare = null;
+  let legsForFare = null; lastRes = null;
   if (BUS && !(inCover(a) && inCover(b))) {
     html += `<h2>สายรถเมล์ที่ควรขึ้น</h2><p class="note">ต้นทางหรือปลายทางอยู่นอกพื้นที่ที่มีข้อมูลสายรถเมล์ (รองรับเฉพาะกรุงเทพฯ และปริมณฑล) จึงแสดงเฉพาะค่าโดยสารประมาณจากระยะทางถนนด้านล่าง</p>`;
   } else if (BUS) {
@@ -277,8 +315,9 @@ document.getElementById('calc').onclick = async () => {
       html += `<h2>สายรถเมล์ที่ควรขึ้น${res.type === 'transfer' ? ' (ต้องต่อรถ 1 ครั้ง)' : ''}</h2>`;
       html += res.options.map((o, idx) => {
         const legs = o.legs.map((l, i) => legHtml(l, o.legs.length > 1 ? (i === 0 ? 'ต่อที่ 1: ' : 'ต่อที่ 2: ') : '')).join('');
-        return `<div class="fare" style="align-items:flex-start"><div>${idx === 0 ? '⭐ แนะนำ<br>' : ''}${legs}<small>เดินรวมประมาณ ${Math.round(o.walk)} เมตร (ไปป้ายต้นทาง/จากป้ายปลายทาง${o.legs.length > 1 ? '/ระหว่างต่อรถ' : ''})</small></div></div>`;
-      }).join('');
+        return `<div class="fare opt${idx === 0 ? ' on' : ''}" data-i="${idx}" style="align-items:flex-start"><div>${idx === 0 ? '⭐ แนะนำ<br>' : ''}${legs}<small>เดินรวมประมาณ ${Math.round(o.walk)} เมตร (ไปป้ายต้นทาง/จากป้ายปลายทาง${o.legs.length > 1 ? '/ระหว่างต่อรถ' : ''})</small></div></div>`;
+      }).join('') + '<div id="map"></div><p class="note">แตะที่ตัวเลือกด้านบนเพื่อดูเส้นทางบนแผนที่ · 🟢 ขึ้น 🔴 ลง ⚫ ต้นทาง/ปลายทาง เส้นประ = เดิน</p>';
+      lastRes = res;
     }
   } else {
     html += `<p class="note">โหลดข้อมูลสายรถเมล์ไม่สำเร็จ (bus-data.json) จึงแสดงเฉพาะค่าโดยสารประมาณ</p>`;
@@ -289,7 +328,43 @@ document.getElementById('calc').onclick = async () => {
     `<p class="note">${BUS ? esc(BUS.asof) + ' อาจไม่ตรงกับสาย/ป้ายปัจจุบัน ' : ''}ราคาเป็นค่าประมาณตามระยะทาง ไม่ใช่ราคาจริงของแต่ละสาย และรถแต่ละสายอาจเป็นรถร้อนหรือรถแอร์ต่างกัน${estimated ? ' (หาเส้นทางถนนไม่ได้ จึงประมาณระยะจากเส้นตรง)' : ''}</p>`;
   out.innerHTML = html;
   out.hidden = false; btn.disabled = false; btn.textContent = 'คำนวณค่ารถเมล์';
+  if (lastRes) {
+    drawMap(0);
+    out.querySelectorAll('.opt').forEach((el) => el.onclick = () => {
+      out.querySelectorAll('.opt').forEach((x) => x.classList.toggle('on', x === el));
+      drawMap(+el.dataset.i);
+    });
+  }
 };
+
+// ===== แผนที่เส้นทาง (Leaflet + OpenStreetMap) =====
+let lastRes = null, map = null;
+const COLORS = ['#e8453c', '#2f6fed'];
+const pin = (c, t) => L.divIcon({ className: '', iconSize: [22, 22], iconAnchor: [11, 11], html: `<div class="pin" style="background:${c}">${t}</div>` });
+function drawMap(idx) {
+  const el = document.getElementById('map');
+  if (typeof L === 'undefined') { el.outerHTML = '<p class="note">โหลดแผนที่ไม่สำเร็จ (ต้องต่ออินเทอร์เน็ต)</p>'; return; }
+  if (map) { map.remove(); map = null; }
+  map = L.map(el, { scrollWheelZoom: false });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+  const o = lastRes.options[idx], a = picked.from, b = picked.to, all = [[a.lat, a.lon], [b.lat, b.lon]];
+  const walk = (p, q) => L.polyline([p, q], { color: '#667090', weight: 3, dashArray: '6 8' }).addTo(map);
+  L.marker([a.lat, a.lon], { icon: pin('#222', 'A') }).addTo(map).bindPopup('ต้นทาง: ' + esc(a.name));
+  L.marker([b.lat, b.lon], { icon: pin('#222', 'B') }).addTo(map).bindPopup('ปลายทาง: ' + esc(b.name));
+  let prev = [a.lat, a.lon];
+  o.legs.forEach((l, i) => {
+    const pts = l.r.s.slice(l.from, l.to + 1).map((id) => pos(id)), c = COLORS[i % 2];
+    walk(prev, pts[0]);
+    L.polyline(pts.map((p) => [p[0], p[1]]), { color: c, weight: 5, opacity: .9 }).addTo(map).bindTooltip('สาย ' + esc(l.r.n), { sticky: true });
+    L.marker([pts[0][0], pts[0][1]], { icon: pin('#1f9d68', '↑') }).addTo(map).bindPopup(`ขึ้น สาย ${esc(l.r.n)}<br>${esc(pts[0][2])}`);
+    const e = pts[pts.length - 1];
+    L.marker([e[0], e[1]], { icon: pin('#d33', '↓') }).addTo(map).bindPopup(`ลง สาย ${esc(l.r.n)}<br>${esc(e[2])}`);
+    pts.forEach((p) => all.push([p[0], p[1]]));
+    prev = [e[0], e[1]];
+  });
+  walk(prev, [b.lat, b.lon]);
+  map.fitBounds(all, { padding: [24, 24] });
+}
 </script>
 </body>
 </html>
