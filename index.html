@@ -39,6 +39,16 @@ button:disabled{opacity:.55;cursor:not-allowed}
   <h1>🚌 คำนวณค่ารถเมล์</h1>
   <p class="sub">บอกสายรถเมล์ที่ต้องขึ้นและค่าโดยสารประมาณ จากที่หนึ่งไปอีกที่หนึ่ง (กรุงเทพฯ)</p>
 
+  <section class="card" id="coverage">
+    <h2>รองรับพื้นที่ไหนบ้าง</h2>
+    <ul class="note" style="margin:0;padding-left:20px">
+      <li><b>ค้นหาสถานที่:</b> ทั่วประเทศไทย</li>
+      <li><b>บอกสายรถเมล์ที่ต้องขึ้น:</b> กรุงเทพมหานครและปริมณฑลใกล้เคียง (บางส่วนของนนทบุรี ปทุมธานี สมุทรปราการ สมุทรสาคร นครปฐม) ได้แก่ รถเมล์ ขสมก. และรถร่วมเอกชนสาย ต. รวมประมาณ 950 เส้นทาง/ทิศ และ 5,600 ป้าย</li>
+      <li><b>จังหวัดอื่น:</b> ยังไม่มีข้อมูลสายรถเมล์ เว็บแสดงเฉพาะระยะทางถนนและค่าโดยสารประมาณ</li>
+      <li><b>ไม่รวม:</b> รถตู้ สองแถว รถไฟฟ้า เรือ และเวลารถ/รอบรถ</li>
+    </ul>
+  </section>
+
   <div class="card" id="from">
     <h2>ต้นทาง</h2>
     <form class="row"><input placeholder="พิมพ์ชื่อสถานที่ เช่น อนุสาวรีย์ชัยสมรภูมิ" autocomplete="off"></form>
@@ -155,6 +165,8 @@ document.getElementById('swap').onclick = () => {
 let BUS = null;
 const busReady = fetch('bus-data.json').then((r) => r.json()).then((d) => { BUS = d; }).catch(() => {});
 
+const COVER = { latMin: 13.50, latMax: 14.15, lonMin: 100.20, lonMax: 100.95 }; // พื้นที่ที่มีข้อมูลสาย
+const inCover = (p) => p.lat >= COVER.latMin && p.lat <= COVER.latMax && p.lon >= COVER.lonMin && p.lon <= COVER.lonMax;
 const WALK_MAX = 800;      // เดินไปป้ายได้ไม่เกิน (เมตร)
 const TRANSFER_MAX = 300;  // ป้ายต่อรถห่างกันไม่เกิน (เมตร)
 function hav(a, b) { // เมตร
@@ -234,7 +246,7 @@ function dedupe(list) {
 const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 function legHtml(l, label) {
   const stopsN = l.to - l.from;
-  return `<div>${label}ขึ้น <b>สาย ${esc(l.r.n)}</b> (ไปทาง ${esc(l.r.h)})<br>
+  return `<div>${label}ขึ้น <b>สาย ${esc(l.r.n)}</b> <small style="display:inline">[${esc(l.r.a || 'ขสมก.')}]</small> (ไปทาง ${esc(l.r.h)})<br>
     <small>ขึ้นที่ ${esc(pos(l.r.s[l.from])[2])} → ลงที่ ${esc(pos(l.r.s[l.to])[2])} · ${stopsN} ป้าย · ${(l.m / 1000).toFixed(1)} กม.</small></div>`;
 }
 document.getElementById('calc').onclick = async () => {
@@ -254,7 +266,9 @@ document.getElementById('calc').onclick = async () => {
   await busReady;
   let html = '';
   let legsForFare = null;
-  if (BUS) {
+  if (BUS && !(inCover(a) && inCover(b))) {
+    html += `<h2>สายรถเมล์ที่ควรขึ้น</h2><p class="note">ต้นทางหรือปลายทางอยู่นอกพื้นที่ที่มีข้อมูลสายรถเมล์ (รองรับเฉพาะกรุงเทพฯ และปริมณฑล) จึงแสดงเฉพาะค่าโดยสารประมาณจากระยะทางถนนด้านล่าง</p>`;
+  } else if (BUS) {
     const res = findRoutes(a, b);
     if (res.type === 'none') {
       html += `<h2>สายรถเมล์ที่ควรขึ้น</h2><p class="note">ไม่พบสายตรงหรือต่อรถ 1 ครั้งที่ป้ายอยู่ห่างจากต้นทาง/ปลายทางไม่เกิน ${WALK_MAX} เมตร ลองเลือกสถานที่ที่อยู่ใกล้ถนนสายหลักมากขึ้น</p>`;
