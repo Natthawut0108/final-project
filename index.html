@@ -41,13 +41,13 @@ button:disabled{opacity:.55;cursor:not-allowed}
 
   <div class="card" id="from">
     <h2>ต้นทาง</h2>
-    <form class="row"><input placeholder="เช่น อนุสาวรีย์ชัยสมรภูมิ"><button>ค้นหา</button></form>
+    <form class="row"><input placeholder="พิมพ์ชื่อสถานที่ เช่น อนุสาวรีย์ชัยสมรภูมิ" autocomplete="off"></form>
     <div class="err"></div><ul class="opts" hidden></ul><div class="picked"></div>
   </div>
   <button class="swap" id="swap" type="button" title="สลับต้นทาง/ปลายทาง">⇅ สลับ</button>
   <div class="card" id="to">
     <h2>ปลายทาง</h2>
-    <form class="row"><input placeholder="เช่น สยามพารากอน"><button>ค้นหา</button></form>
+    <form class="row"><input placeholder="พิมพ์ชื่อสถานที่ เช่น สยามพารากอน" autocomplete="off"></form>
     <div class="err"></div><ul class="opts" hidden></ul><div class="picked"></div>
   </div>
 
@@ -79,25 +79,62 @@ function setupField(id) {
   const root = document.getElementById(id);
   const input = root.querySelector('input'), err = root.querySelector('.err');
   const list = root.querySelector('.opts'), mark = root.querySelector('.picked');
-  root.querySelector('form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    err.textContent = ''; list.hidden = true; list.innerHTML = '';
+  let timer = null, ctrl = null, seq = 0;
+
+  function render(items) {
+    list.innerHTML = '';
+    items.forEach((it) => {
+      const li = document.createElement('li'), b = document.createElement('button');
+      b.type = 'button'; b.textContent = (it.bus ? '🚏 ' : '📍 ') + it.name;
+      b.onclick = () => {
+        input.value = it.short || it.name; setPick(id, { name: it.name, lat: it.lat, lon: it.lon });
+        list.hidden = true; err.textContent = '';
+      };
+      li.appendChild(b); list.appendChild(li);
+    });
+    list.hidden = items.length === 0;
+  }
+  // ค้นชื่อป้ายรถเมล์จากข้อมูลในเครื่อง (เร็ว ไม่ต้องใช้เน็ต)
+  function localStops(q) {
+    if (!BUS) return [];
+    const seen = new Set(), out = [];
+    for (const [, v] of Object.entries(BUS.stops)) {
+      if (!v[2].includes(q) || seen.has(v[2])) continue;
+      seen.add(v[2]);
+      out.push({ bus: true, name: 'ป้ายรถเมล์ ' + v[2], short: v[2], lat: v[0], lon: v[1] });
+      if (out.length >= 4) break;
+    }
+    return out;
+  }
+  async function search() {
     const q = input.value.trim();
-    if (q.length < 2) return;
+    err.textContent = '';
+    if (q.length < 2) { list.hidden = true; return; }
+    const my = ++seq;
+    const local = localStops(q);
+    if (local.length) render(local); // แสดงผลในเครื่องก่อนทันที
+    if (ctrl) ctrl.abort();
+    ctrl = new AbortController();
     try {
-      const r = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=th&accept-language=th&q=' + encodeURIComponent(q));
+      const r = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=th&accept-language=th&q=' + encodeURIComponent(q), { signal: ctrl.signal });
       if (!r.ok) throw new Error();
       const data = await r.json();
-      if (!data.length) { err.textContent = 'ไม่พบสถานที่ ลองพิมพ์ชื่อให้เฉพาะเจาะจงขึ้น'; return; }
-      data.forEach((d) => {
-        const li = document.createElement('li'), b = document.createElement('button');
-        b.type = 'button'; b.textContent = d.display_name;
-        b.onclick = () => { setPick(id, { name: d.display_name, lat: +d.lat, lon: +d.lon }); list.hidden = true; };
-        li.appendChild(b); list.appendChild(li);
-      });
-      list.hidden = false;
-    } catch { err.textContent = 'ค้นหาสถานที่ไม่สำเร็จ ลองใหม่อีกครั้ง'; }
+      if (my !== seq) return;
+      const online = data.map((d) => ({ name: d.display_name, short: d.name || d.display_name.split(',')[0], lat: +d.lat, lon: +d.lon }));
+      const all = local.concat(online);
+      if (!all.length) err.textContent = 'ไม่พบสถานที่ ลองพิมพ์ชื่อให้เฉพาะเจาะจงขึ้น';
+      render(all);
+    } catch (e) {
+      if (e.name === 'AbortError' || my !== seq) return;
+      if (!local.length) err.textContent = 'ค้นหาสถานที่ไม่สำเร็จ ลองใหม่อีกครั้ง';
+    }
+  }
+  input.addEventListener('input', () => {
+    if (picked[id]) setPick(id, null); // แก้ข้อความ = ยกเลิกที่เลือกไว้
+    clearTimeout(timer);
+    timer = setTimeout(search, 500);
   });
+  root.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); clearTimeout(timer); search(); });
   root._mark = mark; root._input = input;
 }
 function setPick(id, p) {
